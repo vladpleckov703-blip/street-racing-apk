@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>Гонки — Уличный заезд</title>
+<style>
+  *{box-sizing:border-box} html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111827;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;touch-action:none}
+  #wrap{height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;gap:8px}
+  #hud{width:min(100%,480px);display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px}
+  #game{width:min(100%,480px);height:min(72dvh,720px);border:2px solid #64748b;border-radius:14px;background:#254b32;display:block;touch-action:none}
+  #controls{width:min(100%,480px);display:flex;gap:10px;justify-content:space-between}
+  .ctrl{flex:1;border:1px solid #64748b;background:#263449;color:white;border-radius:14px;padding:15px 8px;font-size:17px;font-weight:800;user-select:none;-webkit-user-select:none}
+  .ctrl:active{background:#475569}.hint{font-size:12px;color:#cbd5e1;text-align:center}
+  #overlay{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;padding:20px}
+  #panel{width:min(92vw,380px);background:#172033;border:1px solid #64748b;border-radius:18px;padding:22px;text-align:center}
+  #panel h1{margin:0 0 8px;font-size:26px}#panel p{color:#d1d5db;line-height:1.45}
+  #start{background:#22c55e;color:#06210f;border:0;border-radius:12px;padding:13px 24px;font-size:18px;font-weight:900}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud"><span>🏁 Счёт: <b id="score">0</b></span><span>⚡ Скорость: <b id="speed">1</b></span><span id="mode">Обычный режим</span></div>
+  <canvas id="game" width="480" height="720" aria-label="Игра гонки"></canvas>
+  <div id="controls">
+    <button class="ctrl" id="left">⬅ ВЛЕВО</button>
+    <button class="ctrl" id="boost">⚡ УСКОРЕНИЕ</button>
+    <button class="ctrl" id="right">ВПРАВО ➡</button>
+  </div>
+  <div class="hint">Удерживай кнопки для управления. На дороге также можно нажимать слева или справа.</div>
+</div>
+<div id="overlay">
+  <div id="panel">
+    <h1>🚗 Уличные гонки</h1>
+    <p>Объезжай машины и набирай очки. Твоя скорость растёт каждые 2 секунды, скорость соперников — каждые 5 секунд. На 500 очках начинается хаос: машины едут в разных направлениях!</p>
+    <button id="start">НАЧАТЬ</button>
+  </div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),speedEl=document.getElementById('speed'),modeEl=document.getElementById('mode');
+const overlay=document.getElementById('overlay'),startBtn=document.getElementById('start');
+const W=480,H=720, road={x:75,w:330};
+let player,enemies,score,playerSpeed,enemySpeed,last=0,spawn=0,elapsed=0,gameOver=false,running=false,boosting=false,left=false,right=false,roadOffset=0,raf=0;
+const colors=['#ef4444','#f59e0b','#38bdf8','#a78bfa','#f8fafc','#22c55e'];
+function reset(){
+ score=0;playerSpeed=250;enemySpeed=190;elapsed=0;spawn=0;roadOffset=0;gameOver=false;
+ player={x:W/2-22,y:H-135,w:44,h:76};enemies=[];scoreEl.textContent='0';speedEl.textContent='1';modeEl.textContent='Обычный режим';
+}
+function car(x,y,color,playerCar=false){
+ ctx.fillStyle='#111827';ctx.fillRect(x+4,y+5,8,17);ctx.fillRect(x+32,y+5,8,17);ctx.fillRect(x+4,y+54,8,17);ctx.fillRect(x+32,y+54,8,17);
+ ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x,y,44,76,9);ctx.fill();
+ ctx.fillStyle='#cbd5e1';ctx.beginPath();ctx.roundRect(x+7,y+12,30,19,5);ctx.fill();
+ ctx.fillStyle='#334155';ctx.beginPath();ctx.roundRect(x+7,y+43,30,17,4);ctx.fill();
+ ctx.fillStyle=playerCar?'#fde047':'#fecaca';ctx.fillRect(x+5,y+2,9,4);ctx.fillRect(x+30,y+2,9,4);
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.fillStyle='#28613c';ctx.fillRect(0,0,W,H);
+ ctx.fillStyle='#343b46';ctx.fillRect(road.x,0,road.w,H);
+ ctx.fillStyle='#f8fafc';ctx.fillRect(road.x+7,0,5,H);ctx.fillRect(road.x+road.w-12,0,5,H);
+ ctx.fillStyle='#e5e7eb';
+ for(let y=-70+(roadOffset%100);y<H;y+=100){ctx.fillRect(road.x+road.w/3-3,y,6,52);ctx.fillRect(road.x+2*road.w/3-3,y,6,52)}
+ enemies.forEach(e=>car(e.x,e.y,e.color));
+ car(player.x,player.y,'#2563eb',true);
+}
+function spawnEnemy(){
+ const laneW=road.w/3, lane=Math.floor(Math.random()*3);
+ enemies.push({x:road.x+lane*laneW+laneW/2-22,y:-90,w:44,h:76,color:colors[Math.floor(Math.random()*colors.length)],dir:1,dx:0});
+}
+function collide(a,b){return a.x+7<b.x+b.w-7&&a.x+a.w-7>b.x+7&&a.y+8<b.y+b.h-8&&a.y+a.h-8>b.y+8}
+function endGame(){
+ running=false;gameOver=true;cancelAnimationFrame(raf);
+ document.querySelector('#panel h1').textContent='💥 Авария!';
+ document.querySelector('#panel p').textContent='Твой счёт: '+Math.floor(score)+'. Попробуй ещё раз и побей рекорд!';
+ startBtn.textContent='ИГРАТЬ СНОВА';overlay.classList.remove('hidden');
+}
+function frame(t){
+ if(!running)return;const dt=Math.min((t-last)/1000||0,0.04);last=t;elapsed+=dt;
+ score+=dt*10;playerSpeed=250+Math.floor(elapsed/2)*18;enemySpeed=190+Math.floor(elapsed/5)*22;
+ const chaos=score>=500;modeEl.textContent=chaos?'🔥 ХАОС!':'Обычный режим';
+ speedEl.textContent=(playerSpeed/250).toFixed(1);
+ if(left)player.x-=330*dt;if(right)player.x+=330*dt;
+ if(boosting)player.x+=(player.x<W/2? -1:1)*0; // boost affects pace below
+ player.x=Math.max(road.x+14,Math.min(road.x+road.w-player.w-14,player.x));
+ roadOffset+=(playerSpeed+(boosting?110:0))*dt;
+ spawn+=dt;if(spawn>(chaos?0.72:1.05)){spawn=0;spawnEnemy()}
+ enemies.forEach(e=>{
+   if(chaos){
+     if(e.dx===0){e.dir=Math.random()<.5?1:-1;e.dx=(Math.random()-.5)*150}
+     e.y+=enemySpeed*e.dir*dt;
+     e.x+=e.dx*dt;
+     if(e.x<road.x+12||e.x+e.w>road.x+road.w-12)e.dx*=-1;
+   }else e.y+=enemySpeed*dt;
+ });
+ enemies=enemies.filter(e=>e.y<H+100&&e.y>-130);
+ for(const e of enemies){if(collide(player,e)){endGame();return}}
+ scoreEl.textContent=Math.floor(score);
+ draw();raf=requestAnimationFrame(frame);
+}
+function start(){reset();overlay.classList.add('hidden');running=true;last=performance.now();raf=requestAnimationFrame(frame)}
+startBtn.addEventListener('click',start);
+function hold(el,on,off){el.addEventListener('pointerdown',e=>{e.preventDefault();on();el.setPointerCapture(e.pointerId)});['pointerup','pointercancel','lostpointercapture'].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();off()}))}
+hold(document.getElementById('left'),()=>left=true,()=>left=false);
+hold(document.getElementById('right'),()=>right=true,()=>right=false);
+hold(document.getElementById('boost'),()=>boosting=true,()=>boosting=false);
+canvas.addEventListener('pointerdown',e=>{const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W;if(x<W/2)left=true;else right=true});
+canvas.addEventListener('pointerup',()=>{left=false;right=false});canvas.addEventListener('pointercancel',()=>{left=false;right=false});
+reset();draw();
+})();
+</script>
+</body>
+</html>
